@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Shooter - Pilot Dashboard</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0a0a0a;
+            color: white;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #main-container {
+            display: flex;
+            flex-direction: row;
+            gap: 20px;
+            padding: 20px;
+            border: 4px solid #333;
+            background: #111;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+            border-radius: 10px;
+        }
+
+        /* Área de Gameplay */
+        canvas {
+            background: black;
+            border: 2px solid #a020f0; /* Borda Roxa */
+            box-shadow: 0 0 15px rgba(160, 32, 240, 0.2);
+        }
+
+        /* Painel Lateral Direito */
+        #sidebar {
+            width: 200px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            background: #1a1a1a;
+            padding: 20px;
+            border: 2px solid #444;
+            border-radius: 5px;
+        }
+
+        #pilot-container {
+            width: 150px;
+            height: 150px;
+            border: 3px solid #00ff44; /* Borda verde pro piloto */
+            background: #000;
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(0, 255, 68, 0.3);
+        }
+
+        .stats-box {
+            text-align: center;
+            width: 100%;
+        }
+
+        .label { color: #888; font-size: 12px; }
+        .value { color: #00ffff; font-size: 24px; font-weight: bold; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+
+    <div id="main-container">
+        <!-- ÁREA DE JOGO -->
+        <canvas id="gameCanvas"></canvas>
+
+        <!-- PAINEL DO PILOTO (FORA DO JOGO) -->
+        <div id="sidebar">
+            <div class="stats-box">
+                <div class="label">STATUS DO PILOTO</div>
+                <div id="pilot-container">
+                    <canvas id="pilotCanvas" width="150" height="150"></canvas>
+                </div>
+            </div>
+
+            <div class="stats-box">
+                <div class="label">SCORE</div>
+                <div id="score" class="value">0000</div>
+                
+                <div class="label">CARGA</div>
+                <div id="charge-bar" style="width: 100%; height: 10px; background: #333; margin-top: 5px;">
+                    <div id="charge-fill" style="width: 0%; height: 100%; background: #00ffff;"></div>
+                </div>
+            </div>
+
+            <div style="font-size: 10px; color: #555; text-align: center;">
+                P: PAUSE<br>SPACE: TIRO
+            </div>
+        </div>
+    </div>
+
+<script>
+/** @type {HTMLCanvasElement} */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const pilotCanvas = document.getElementById('pilotCanvas');
+const pCtx = pilotCanvas.getContext('2d');
+
+canvas.width = 500;
+canvas.height = 600;
+
+let score = 0;
+let isPaused = false;
+let isGameOver = false;
+let frames = 0;
+
+// Estado do Piloto (0: neutro, 1: sorrindo, 2: triste)
+let pilotMood = 0;
+let pilotTimer = 0;
+
+const keys = { ArrowLeft: false, ArrowRight: false, KeyA: false, KeyD: false, Space: false };
+
+const player = {
+    x: canvas.width / 2 - 25,
+    y: canvas.height - 80,
+    w: 50,
+    h: 50,
+    speed: 7,
+    charge: 0,
+    maxCharge: 50,
+    isCharging: false
+};
+
+let bullets = [];
+let enemies = [];
+let explosions = [];
+let stars = [];
+
+for(let i = 0; i < 40; i++) {
+    stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, size: Math.random() * 2, speed: Math.random() * 2 + 0.5 });
+}
+
+// LÓGICA DO PILOTO (STAR FOX STYLE)
+function drawPilot() {
+    pCtx.clearRect(0, 0, pilotCanvas.width, pilotCanvas.height);
+    const x = 75;
+    const y = 80;
+
+    // Fundo
+    pCtx.fillStyle = '#050505';
+    pCtx.fillRect(0,0,150,150);
+
+    // Rosto
+    pCtx.fillStyle = '#ffdbac';
+    pCtx.beginPath();
+    pCtx.arc(x, y + 10, 40, 0, Math.PI*2);
+    pCtx.fill();
+
+    // Capacete
+    pCtx.fillStyle = '#444';
+    pCtx.beginPath();
+    pCtx.arc(x, y, 45, Math.PI, 0);
+    pCtx.lineTo(x + 45, y + 20);
+    pCtx.lineTo(x - 45, y + 20);
+    pCtx.fill();
+
+    // Viseira Verde
+    pCtx.fillStyle = '#00ff44';
+    pCtx.shadowBlur = 10;
+    pCtx.shadowColor = '#00ff44';
+    pCtx.fillRect(x - 30, y - 15, 60, 20);
+    pCtx.shadowBlur = 0;
+
+    // Expressão da Boca
+    pCtx.strokeStyle = '#000';
+    pCtx.lineWidth = 3;
+    pCtx.beginPath();
+    if (pilotMood === 1) { // SORRINDO
+        pCtx.arc(x, y + 25, 15, 0.1 * Math.PI, 0.9 * Math.PI);
+    } else if (pilotMood === 2) { // TRISTE
+        pCtx.arc(x, y + 45, 15, 1.1 * Math.PI, 1.9 * Math.PI);
+    } else { // NEUTRO
+        pCtx.moveTo(x - 15, y + 35);
+        pCtx.lineTo(x + 15, y + 35);
+    }
+    pCtx.stroke();
+}
+
+// INIMIGOS
+class Enemy {
+    constructor(x, y, type) {
+        this.x = x;
+        this.y = y;
+        this.w = 40;
+        this.h = 20;
+        this.type = type;
+        this.speedX = type === 'random' ? (Math.random() - 0.5) * 6 : 2;
+    }
+    update() {
+        if (this.type === 'group') {
+            this.x += Math.sin(frames / 25) * 4;
+            this.y += 1.2;
+        } else {
+            this.x += this.speedX;
+            this.y += 1.8;
+            if (this.x < 0 || this.x > canvas.width - this.w) this.speedX *= -1;
+        }
+    }
+    draw() {
+        ctx.fillStyle = '#ff3366'; // OVNIs avermelhados
+        ctx.beginPath();
+        ctx.ellipse(this.x + this.w/2, this.y + this.h/2, this.w/2, this.h/2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#00ff88';
+        ctx.fillRect(this.x + this.w/2 - 5, this.y + 2, 10, 5);
+    }
+}
+
+// INPUTS
+window.addEventListener('keydown', e => {
+    if (e.code === 'KeyP' && !isGameOver) isPaused = !isPaused;
+    if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
+});
+
+window.addEventListener('keyup', e => {
+    if (e.code === 'Space' && !isGameOver && !isPaused) {
+        fireBullet();
+        player.charge = 0;
+        player.isCharging = false;
+        pilotMood = 1; // Sorri
+        pilotTimer = 25;
+    }
+    if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
+});
+
+function fireBullet() {
+    const isBig = player.charge >= player.maxCharge;
+    bullets.push({
+        x: player.x + player.w / 2 - (isBig ? 12 : 3),
+        y: player.y,
+        w: isBig ? 24 : 6,
+        h: isBig ? 40 : 15,
+        speed: 12,
+        isBig: isBig
+    });
+}
+
+function createExplosion(x, y, big) {
+    for (let i = 0; i < (big ? 40 : 15); i++) {
+        explosions.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * (big ? 12 : 6),
+            vy: (Math.random() - 0.5) * (big ? 12 : 6),
+            life: 1.0,
+            color: big ? '#00ffff' : '#a020f0'
+        });
+    }
+}
+
+function update() {
+    if (isPaused || isGameOver) return;
+
+    if ((keys.ArrowLeft || keys.KeyA) && player.x > 0) player.x -= player.speed;
+    if ((keys.ArrowRight || keys.KeyD) && player.x < canvas.width - player.w) player.x += player.speed;
+
+    if (keys.Space) {
+        player.isCharging = true;
+        if (player.charge < player.maxCharge) player.charge++;
+    }
+    
+    document.getElementById('charge-fill').style.width = (player.charge / player.maxCharge * 100) + '%';
+
+    if (pilotTimer > 0) { pilotTimer--; } else if (!isGameOver) { pilotMood = 0; }
+
+    stars.forEach(s => { s.y += s.speed; if (s.y > canvas.height) s.y = 0; });
+
+    bullets.forEach((b, i) => {
+        b.y -= b.speed;
+        if (b.y < -50) bullets.splice(i, 1);
+    });
+
+    if (frames % 50 === 0) {
+        enemies.push(new Enemy(Math.random() * (canvas.width - 40), -50, Math.random() > 0.5 ? 'group' : 'random'));
+    }
+
+    enemies.forEach((en, eIdx) => {
+        en.update();
+        
+        if (en.y > canvas.height || (en.x < player.x + player.w && en.x + en.w > player.x && en.y < player.y + player.h && en.y + en.h > player.y)) {
+            isGameOver = true;
+            pilotMood = 2; // TRISTE NO GAME OVER
+        }
+
+        bullets.forEach((b, bIdx) => {
+            if (b.x < en.x + en.w && b.x + b.w > en.x && b.y < en.y + en.h && b.y + b.h > en.y) {
+                createExplosion(en.x + en.w/2, en.y + en.h/2, b.isBig);
+                enemies.splice(eIdx, 1);
+                if (!b.isBig) bullets.splice(bIdx, 1);
+                score += 100;
+                document.getElementById('score').innerText = score.toString().padStart(4, '0');
+            }
+        });
+    });
+
+    explosions.forEach((ex, i) => {
+        ex.x += ex.vx; ex.y += ex.vy; ex.life -= 0.03;
+        if (ex.life <= 0) explosions.splice(i, 1);
+    });
+
+    frames++;
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Background Estrelas
+    ctx.fillStyle = "white";
+    stars.forEach(s => ctx.fillRect(s.x, s.y, s.size, s.size));
+
+    // Tiros Azuis
+    bullets.forEach(b => {
+        ctx.fillStyle = b.isBig ? '#00ffff' : '#4444ff';
+        ctx.shadowBlur = b.isBig ? 15 : 5;
+        ctx.shadowColor = '#00ffff';
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+        ctx.shadowBlur = 0;
+    });
+
+    // Inimigos
+    enemies.forEach(en => en.draw());
+
+    // Explosões
+    explosions.forEach(ex => {
+        ctx.globalAlpha = ex.life;
+        ctx.fillStyle = ex.color;
+        ctx.fillRect(ex.x, ex.y, 3, 3);
+    });
+    ctx.globalAlpha = 1.0;
+
+    // NAVE: Branca com pontas roxas
+    const px = player.x; const py = player.y;
+    ctx.fillStyle = '#a020f0'; // ROXO
+    ctx.beginPath(); ctx.moveTo(px, py+40); ctx.lineTo(px-10, py+50); ctx.lineTo(px+10, py+50); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(px+50, py+40); ctx.lineTo(px+40, py+50); ctx.lineTo(px+60, py+50); ctx.fill();
+    ctx.fillStyle = '#fff'; // BRANCO
+    ctx.beginPath(); ctx.moveTo(px+25, py); ctx.lineTo(px, py+40); ctx.lineTo(px+50, py+40); ctx.fill();
+
+    if (player.isCharging) {
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(px + 25, py + 20, (player.charge / player.maxCharge) * 35, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    // Telas de Overlay
+    if (isPaused) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0,0,canvas.width, canvas.height);
+        ctx.fillStyle = 'white'; ctx.textAlign = 'center';
+        ctx.font = '30px Courier'; ctx.fillText('PAUSADO', canvas.width/2, canvas.height/2);
+    }
+
+    if (isGameOver) {
+        ctx.fillStyle = 'rgba(50,0,0,0.8)';
+        ctx.fillRect(0,0,canvas.width, canvas.height);
+        ctx.fillStyle = 'white'; ctx.textAlign = 'center';
+        ctx.font = '40px Courier'; ctx.fillText('GAME OVER', canvas.width/2, canvas.height/2);
+        ctx.font = '16px Courier'; ctx.fillText('F5 PARA REINICIAR', canvas.width/2, canvas.height/2 + 50);
+    }
+
+    drawPilot(); // Desenha o piloto no canvas lateral
+    requestAnimationFrame(draw);
+}
+
+// Loop de lógica separado para 60fps constantes
+setInterval(update, 1000/60);
+draw();
+</script>
+</body>
+</html>
